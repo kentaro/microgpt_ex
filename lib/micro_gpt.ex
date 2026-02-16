@@ -52,7 +52,7 @@ defmodule MicroGPT do
     IO.puts("num docs: #{length(docs)}\nvocab size: #{vocab_size}")
     {state_dict, params} = init_params(vocab_size)
     IO.puts("num params: #{length(params)}")
-    {_state_dict, _params} = train(docs, uchars, bos, vocab_size, state_dict, params, 1000)
+    {state_dict, _params} = train(docs, uchars, bos, vocab_size, state_dict, params, 1000)
     inference(uchars, bos, vocab_size, state_dict, 20)
   end
 
@@ -98,13 +98,13 @@ defmodule MicroGPT do
     Enum.map(x, &Value.mul(&1, scale))
   end
 
-  @spec gpt(integer(), integer(), list(list(list(Value.t()))), list(list(list(Value.t()))), state_dict) :: list(Value.t())
+  @spec gpt(integer(), integer(), list(list(list(Value.t()))), list(list(list(Value.t()))), state_dict) :: {list(Value.t()), list(list(list(Value.t()))), list(list(list(Value.t())))}
   defp gpt(token_id, pos_id, keys, values, state_dict) do
     {_n_embd, n_head, n_layer, head_dim} = {16, 4, 1, 4}
     tok_emb = Enum.at(state_dict["wte"], token_id)
     pos_emb = Enum.at(state_dict["wpe"], pos_id)
     x = Enum.zip(tok_emb, pos_emb) |> Enum.map(fn {t, p} -> Value.add(t, p) end) |> rmsnorm()
-    {x, _} = Enum.reduce(0..(n_layer - 1), {x, {keys, values}}, fn li, {x, {ks, vs}} ->
+    {x, {updated_keys, updated_values}} = Enum.reduce(0..(n_layer - 1), {x, {keys, values}}, fn li, {x, {ks, vs}} ->
       x_res = x
       x = rmsnorm(x)
       {q, k, v} = {linear(x, state_dict["layer#{li}.attn_wq"]), linear(x, state_dict["layer#{li}.attn_wk"]), linear(x, state_dict["layer#{li}.attn_wv"])}
@@ -120,11 +120,11 @@ defmodule MicroGPT do
       x = rmsnorm(x) |> linear(state_dict["layer#{li}.mlp_fc1"]) |> Enum.map(&Value.relu/1) |> linear(state_dict["layer#{li}.mlp_fc2"]) |> Enum.zip(x_res) |> Enum.map(fn {a, b} -> Value.add(a, b) end)
       {x, {List.update_at(ks, li, &(&1 ++ [k])), List.update_at(vs, li, &(&1 ++ [v]))}}
     end)
-    linear(x, state_dict["lm_head"])
+    {linear(x, state_dict["lm_head"]), updated_keys, updated_values}
   end
 
   @spec train(list(String.t()), list(String.t()), integer(), integer(), state_dict, params, integer()) :: {state_dict, params}
-  defp train(docs, uchars, bos, _vocab_size, state_dict, params, num_steps) do
+  defp train(docs, uchars, bos, vocab_size, state_dict, params, num_steps) do
     {block_size, n_layer, lr, beta1, beta2, eps} = {16, 1, 0.01, 0.85, 0.99, 1.0e-8}
     {m, v} = {List.duplicate(0.0, length(params)), List.duplicate(0.0, length(params))}
     Enum.reduce(0..(num_steps - 1), {state_dict, params, m, v}, fn step, {sd, ps, m, v} ->
@@ -134,7 +134,7 @@ defmodule MicroGPT do
       {keys, values} = {List.duplicate([], n_layer), List.duplicate([], n_layer)}
       {losses, _, _} = Enum.reduce(0..(n - 1), {[], keys, values}, fn pos_id, {ls, ks, vs} ->
         {token_id, target_id} = {Enum.at(tokens, pos_id), Enum.at(tokens, pos_id + 1)}
-        logits = gpt(token_id, pos_id, ks, vs, sd)
+        {logits, ks, vs} = gpt(token_id, pos_id, ks, vs, sd)
         probs = softmax(logits)
         loss_t = Value.neg(Value.log(Enum.at(probs, target_id)))
         {ls ++ [loss_t], ks, vs}
@@ -148,9 +148,25 @@ defmodule MicroGPT do
         {m_new, v_new, %{p | data: p.data - lr_t * m_hat / (:math.pow(v_hat, 0.5) + eps), grad: 0.0}}
       end)
       {m, v, ps} = {Enum.map(updates, &elem(&1, 0)), Enum.map(updates, &elem(&1, 1)), Enum.map(updates, &elem(&1, 2))}
+      sd = rebuild_state_dict(ps, vocab_size, n_layer)
       IO.puts("step #{String.pad_leading("#{step + 1}", 4)} / #{num_steps} | loss #{Float.round(loss.data, 4)}")
       {sd, ps, m, v}
     end) |> then(fn {sd, ps, _, _} -> {sd, ps} end)
+  end
+
+  defp rebuild_state_dict(params, vocab_size, n_layer) do
+    {n_embd, block_size} = {16, 16}
+    shapes = [
+      {"wte", {vocab_size, n_embd}},
+      {"wpe", {block_size, n_embd}},
+      {"lm_head", {vocab_size, n_embd}}
+    ] ++ (for i <- 0..(n_layer-1), key <- ["attn_wq", "attn_wk", "attn_wv", "attn_wo"], do: {"layer#{i}.#{key}", {n_embd, n_embd}}) ++ (for i <- 0..(n_layer-1), do: [{"layer#{i}.mlp_fc1", {4*n_embd, n_embd}}, {"layer#{i}.mlp_fc2", {n_embd, 4*n_embd}}]) |> List.flatten()
+    {state_dict, _} = Enum.reduce(shapes, {%{}, params}, fn {name, {nout, nin}}, {sd, ps} ->
+      {matrix_params, rest} = Enum.split(ps, nout * nin)
+      matrix = Enum.chunk_every(matrix_params, nin)
+      {Map.put(sd, name, matrix), rest}
+    end)
+    state_dict
   end
 
   @spec inference(list(String.t()), integer(), integer(), state_dict, integer()) :: :ok
@@ -160,7 +176,7 @@ defmodule MicroGPT do
     for sample_idx <- 0..(num_samples - 1) do
       {keys, values} = {List.duplicate([], n_layer), List.duplicate([], n_layer)}
       {sample, _, _, _} = Enum.reduce_while(0..(block_size - 1), {[], bos, keys, values}, fn pos_id, {samp, tok_id, ks, vs} ->
-        logits = gpt(tok_id, pos_id, ks, vs, state_dict)
+        {logits, ks, vs} = gpt(tok_id, pos_id, ks, vs, state_dict)
         probs = softmax(Enum.map(logits, &Value.div(&1, temperature)))
         weights = Enum.map(probs, & &1.data)
         token_id = weighted_choice(0..(vocab_size - 1) |> Enum.to_list(), weights)
