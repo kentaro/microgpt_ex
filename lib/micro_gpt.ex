@@ -58,7 +58,10 @@ defmodule MicroGPT do
 
   @spec load_dataset() :: list(String.t())
   defp load_dataset do
-    unless File.exists?("input.txt"), do: raise("Please download: curl -L https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt -o input.txt")
+    unless File.exists?("input.txt") do
+      IO.puts("Downloading dataset...")
+      System.cmd("curl", ["-sL", "https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt", "-o", "input.txt"], stderr_to_stdout: true)
+    end
     File.read!("input.txt") |> String.split("\n", trim: true) |> Enum.shuffle()
   end
 
