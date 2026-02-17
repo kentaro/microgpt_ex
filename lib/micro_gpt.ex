@@ -44,8 +44,8 @@ defmodule MicroGPT do
   @type state_dict :: %{String.t() => matrix}
   @type params :: list(Value.t())
 
-  @spec main() :: :ok
-  def main do
+  @spec run() :: :ok
+  def run do
     :rand.seed(:exsss, {42, 42, 42})
     docs = load_dataset()
     {uchars, bos, vocab_size} = setup_tokenizer(docs)
@@ -172,8 +172,9 @@ defmodule MicroGPT do
     state_dict
   end
 
+  @doc "Generate samples using trained model"
   @spec inference(list(String.t()), integer(), integer(), state_dict, integer()) :: :ok
-  defp inference(uchars, bos, vocab_size, state_dict, num_samples) do
+  def inference(uchars, bos, vocab_size, state_dict, num_samples \\ 20) do
     IO.puts("\n--- inference (new, hallucinated names) ---")
     {block_size, n_layer, temperature} = {16, 1, 0.5}
     for sample_idx <- 0..(num_samples - 1) do
