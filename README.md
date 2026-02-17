@@ -24,7 +24,15 @@ mix run
 
 That's it. Training data is downloaded automatically, just like the Python version.
 
-### Expected Output
+Trained model is cached in `_build/microgpt_model.bin`. Subsequent runs skip training and go straight to inference:
+
+```bash
+mix run                          # First run: train (~40 min) → save → inference
+mix run                          # Next runs: load → inference (instant)
+rm _build/microgpt_model.bin     # Delete cache to retrain
+```
+
+### Expected Output (first run)
 
 ```
 Downloading dataset...
@@ -32,7 +40,6 @@ num docs: 32033
 vocab size: 27
 num params: 4192
 step    1 / 1000 | loss 5.4328
-step    2 / 1000 | loss 5.0459
 ...
 step 1000 / 1000 | loss 2.3416
 
@@ -40,14 +47,13 @@ step 1000 / 1000 | loss 2.3416
 sample  1: aemena
 sample  2: kara
 sample  3: aria
-sample  4: amelem
 ...
 ```
 
 ### Public API
 
 ```elixir
-# Run full training + inference (also called automatically by `mix run`)
+# Run training (or load cached model) + inference
 MicroGPT.run()
 
 # Generate samples from a trained model
