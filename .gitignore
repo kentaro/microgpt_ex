@@ -28,6 +28,17 @@ input.txt
 training_output.txt
 full_training.log
 
-# Test scripts
-test_run.exs
-quick_test.exs
+# Temporary test/demo scripts (keep mix.exs and test/*.exs)
+/*_test.exs
+/*_demo.exs
+/test_*.exs
+/quick_*.exs
+/chat_*.exs
+/fast_*.exs
+/improved_*.exs
+conversations.txt
+
+# Temporary modules in lib/
+lib/*_test.ex
+lib/*_fast.ex
+lib/micro_gpt/chat.ex
