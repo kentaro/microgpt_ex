@@ -50,7 +50,7 @@ defmodule MicroGPT do
     :rand.seed(:exsss, {42, 42, 42})
     docs = load_dataset()
     {uchars, bos, vocab_size} = setup_tokenizer(docs)
-    sd = if File.exists?(@model_path), do: (IO.puts("Loading model..."); File.read!(@model_path) |> :erlang.binary_to_term()), else: (
+    sd = if File.exists?(@model_path), do: (IO.puts("Loading model..."); :rand.seed(:exsss); File.read!(@model_path) |> :erlang.binary_to_term()), else: (
       IO.puts("num docs: #{length(docs)}\nvocab size: #{vocab_size}")
       {sd, ps} = init_params(vocab_size)
       IO.puts("num params: #{length(ps)}")
