@@ -44,16 +44,19 @@ defmodule MicroGPT do
   @type state_dict :: %{String.t() => matrix}
   @type params :: list(Value.t())
 
+  @model_path "_build/microgpt_model.bin"
   @spec run() :: :ok
   def run do
     :rand.seed(:exsss, {42, 42, 42})
     docs = load_dataset()
     {uchars, bos, vocab_size} = setup_tokenizer(docs)
-    IO.puts("num docs: #{length(docs)}\nvocab size: #{vocab_size}")
-    {state_dict, params} = init_params(vocab_size)
-    IO.puts("num params: #{length(params)}")
-    {state_dict, _params} = train(docs, uchars, bos, vocab_size, state_dict, params, 1000)
-    inference(uchars, bos, vocab_size, state_dict, 20)
+    sd = if File.exists?(@model_path), do: (IO.puts("Loading model..."); File.read!(@model_path) |> :erlang.binary_to_term()), else: (
+      IO.puts("num docs: #{length(docs)}\nvocab size: #{vocab_size}")
+      {sd, ps} = init_params(vocab_size)
+      IO.puts("num params: #{length(ps)}")
+      {sd, _} = train(docs, uchars, bos, vocab_size, sd, ps, 1000)
+      File.write!(@model_path, :erlang.term_to_binary(sd)); sd)
+    inference(uchars, bos, vocab_size, sd, 20)
   end
 
   @spec load_dataset() :: list(String.t())
@@ -82,10 +85,8 @@ defmodule MicroGPT do
     params = for mat <- Map.values(state_dict), row <- mat, p <- row, do: p
     {state_dict, params}
   end
-
   @spec linear(list(Value.t()), matrix) :: list(Value.t())
   defp linear(x, w), do: for(wo <- w, do: Enum.zip(wo, x) |> Enum.reduce(Value.new(0), fn {wi, xi}, acc -> Value.add(acc, Value.mul(wi, xi)) end))
-
   @spec softmax(list(Value.t())) :: list(Value.t())
   defp softmax(logits) do
     max_val = Enum.map(logits, & &1.data) |> Enum.max()
@@ -93,7 +94,6 @@ defmodule MicroGPT do
     total = Enum.reduce(exps, Value.new(0), &Value.add/2)
     Enum.map(exps, &Value.div(&1, total))
   end
-
   @spec rmsnorm(list(Value.t())) :: list(Value.t())
   defp rmsnorm(x) do
     ms = Enum.reduce(x, Value.new(0), fn xi, acc -> Value.add(acc, Value.mul(xi, xi)) end) |> Value.div(length(x))
